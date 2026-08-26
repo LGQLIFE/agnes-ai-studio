@@ -10,6 +10,7 @@ from .config import get_app_dir
 # ---------- 模型选项 ----------
 TEXT_MODEL_OPTIONS = {
     'agnes-2.5-flash': 'Agnes 2.5 Flash (推荐，免费)',
+    'MiniMax-M3': 'MiniMax M3',
     'agnes-2.5-pro-alpha': 'Agnes 2.5 Pro Alpha (高级)',
     'agnes-2.0-flash': 'Agnes 2.0 Flash',
     'deepseek-v4-flash': 'DeepSeek V4 Flash',
@@ -33,14 +34,17 @@ IMAGE_MODEL_OPTIONS = {
     'qwen-image-plus': 'Qwen Image Plus',
 }
 VIDEO_MODEL_OPTIONS = {
-    'agnes-video-v2.0': 'Agnes Video 2.0 (推荐)',
+    'agnes-video-2.5-flash': 'Agnes Video 2.5 Flash (推荐)',
+    'agnes-video-2.5': 'Agnes Video 2.5',
+    'MiniMax-H3': 'MiniMax H3 (MiniMax 视频生成)',
+    'agnes-video-v2.0': 'Agnes Video 2.0',
     'minimax-video-01': 'MiniMax Video 01',
     'doubao-seaweed-t2v': '豆包 Seaweed T2V',
     'qwen-video-gen': 'Qwen Video Gen',
 }
 DEFAULT_TEXT_MODEL = 'agnes-2.5-flash'
 DEFAULT_IMAGE_MODEL = 'agnes-image-2.1-flash'
-DEFAULT_VIDEO_MODEL = 'agnes-video-v2.0'
+DEFAULT_VIDEO_MODEL = 'agnes-video-2.5-flash'
 
 # ---------- 视频任务状态（内存存储，重启后丢失）----------
 video_tasks = {}

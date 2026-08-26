@@ -589,15 +589,16 @@
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">参考图片</label>
+                    <label class="form-label">参考图片（支持多张）</label>
                     <div class="drop-zone" id="img2imgDropZone" onclick="document.getElementById('img2imgFileInput').click()">
                         <div class="drop-zone-icon">🖼</div>
                         <div class="drop-zone-text">拖拽图片到此处，或<strong>点击选择</strong></div>
-                        <div class="drop-zone-hint">支持 JPG / PNG / GIF / WebP</div>
-                        <input type="file" class="upload-input" id="img2imgFileInput" accept="image/*" onchange="handleDropZoneFile(this, 'img2img')">
+                        <div class="drop-zone-hint">支持 JPG / PNG / GIF / WebP，可上传多张</div>
+                        <input type="file" class="upload-input" id="img2imgFileInput" accept="image/*" multiple onchange="handleDropZoneFiles(this, 'img2img')">
                     </div>
-                    <div class="form-hint" style="margin-top:8px;">或者直接输入图片 URL：</div>
-                    <input type="text" class="form-input" id="img2imgUrl" placeholder="输入参考图片的 URL 地址..." style="margin-top:4px;">
+                    <div id="img2imgThumbs" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+                    <div class="form-hint" style="margin-top:8px;">或者直接输入图片 URL（多张用逗号分隔）：</div>
+                    <input type="text" class="form-input" id="img2imgUrl" placeholder="输入参考图片 URL，多张用英文逗号分隔..." style="margin-top:4px;">
                 </div>
 
                 <div class="form-group">
@@ -644,6 +645,8 @@
                     <div class="result-actions">
                         <button class="btn btn-sm" onclick="downloadImg2Img()">📥 下载图片</button>
                         <button class="btn btn-sm" onclick="copyImg2ImgUrl()">📋 复制URL</button>
+                        <button class="btn btn-sm" id="img2imgSizeBtn" onclick="toggleImg2ImgSize()">📐 尺寸: 完整</button>
+                        <button class="btn btn-sm" style="color:var(--error);" onclick="deleteImg2Img()">🗑 删除图片</button>
                         <span style="font-size:11px;color:var(--success);margin-left:8px;display:none;" id="img2imgLocalSaved">✅ 已保存到 pictures 文件夹</span>
                     </div>
                 </div>
@@ -670,15 +673,16 @@
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">参考图片 (可选 - 图生视频)</label>
+                    <label class="form-label">参考图片（支持多张 - 图生视频）</label>
                     <div class="drop-zone" id="videoDropZone" onclick="document.getElementById('videoFileInput').click()">
                         <div class="drop-zone-icon">🖼</div>
                         <div class="drop-zone-text">拖拽图片到此处，或<strong>点击选择</strong></div>
-                        <div class="drop-zone-hint">支持 JPG / PNG / GIF / WebP</div>
-                        <input type="file" class="upload-input" id="videoFileInput" accept="image/*" onchange="handleDropZoneFile(this, 'video')">
+                        <div class="drop-zone-hint">支持 JPG / PNG / GIF / WebP，可上传多张</div>
+                        <input type="file" class="upload-input" id="videoFileInput" accept="image/*" multiple onchange="handleDropZoneFiles(this, 'video')">
                     </div>
-                    <div class="form-hint" style="margin-top:8px;">或者直接输入图片 URL：</div>
-                    <input type="text" class="form-input" id="videoImageUrl" placeholder="留空则为纯文本生成视频，填入图片URL则为图生视频" style="margin-top:4px;">
+                    <div id="videoThumbs" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+                    <div class="form-hint" style="margin-top:8px;">或者直接输入图片 URL（多张用逗号分隔）：</div>
+                    <input type="text" class="form-input" id="videoImageUrl" placeholder="留空则纯文本生成，填入URL则图生视频，多张用逗号分隔" style="margin-top:4px;">
                 </div>
 
                 <div class="form-row">
@@ -737,6 +741,8 @@
                         <div class="result-actions" id="videoResultActions" style="display:none;">
                             <button class="btn btn-sm" id="downloadVideoBtn" onclick="downloadVideo()">📥 下载视频</button>
                             <button class="btn btn-sm" id="copyVideoUrlBtn" onclick="copyVideoUrl()">📋 复制URL</button>
+                            <button class="btn btn-sm" id="videoSizeBtn" onclick="toggleVideoSize()">📐 尺寸: 完整</button>
+                            <button class="btn btn-sm" id="deleteVideoBtn" style="color:var(--error);" onclick="deleteVideo()">🗑 删除视频</button>
                             <span style="font-size:11px;color:var(--success);margin-left:8px;display:none;" id="videoLocalSaved">✅ 已保存到 videos 文件夹</span>
                         </div>
                     </div>
@@ -799,14 +805,16 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">🎨 角色风格</label>
-                        <select class="form-select" id="dramaCharacterStyle">
+                        <select class="form-select" id="dramaCharacterStyle" onchange="toggleCustomCharacterStyle()">
                             <option value="anime" selected>动漫卡通</option>
                             <option value="realistic">写实真人</option>
                             <option value="pixar3d">皮克斯3D</option>
                             <option value="semi_realistic">半写实插画</option>
                             <option value="watercolor">水彩手绘</option>
                             <option value="ink">中国水墨</option>
+                            <option value="custom">自定义风格...</option>
                         </select>
+                        <input type="text" class="form-input" id="dramaCustomCharacterStyle" placeholder="请输入自定义角色风格描述，例如：赛博朋克风格、复古油画风格..." style="display:none;margin-top:6px;">
                     </div>
                 </div>
 
@@ -938,7 +946,7 @@
                 <!-- 文稿输入 -->
                 <div class="form-group">
                     <label class="form-label">📝 文稿内容</label>
-                    <textarea id="anchorScript" rows="8" placeholder="请输入或粘贴口播文稿内容...&#10;&#10;支持长文章，系统会自动按语义分段，每段生成配音和画面。"></textarea>
+                    <textarea class="form-textarea" id="anchorScript" rows="8" style="min-height:160px;" placeholder="请输入或粘贴口播文稿内容...&#10;&#10;支持长文章，系统会自动按语义分段，每段生成配音和画面。"></textarea>
                 </div>
 
                 <!-- 模式选择 -->
@@ -1104,11 +1112,14 @@
                 <label class="form-label">通义千问（DashScope） API Key</label>
                 <input type="password" class="form-input" id="qwenApiKeyInput" placeholder="DashScope API Key（可选）">
             </div>
-            <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">
-            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🖼 生图模型</div>
             <div class="form-group">
                 <label class="form-label">MiniMax API Key</label>
-                <input type="password" class="form-input" id="minimaxApiKeyInput" placeholder="MiniMax API Key（可选）">
+                <input type="password" class="form-input" id="minimaxApiKeyInput" placeholder="MiniMax API Key（可选，用于 MiniMax M3 等模型）">
+            </div>
+            <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🖼 生图模型</div>
+            <div class="form-hint" style="margin-bottom:8px;">
+                MiniMax 等厂商的生图模型复用上方对应厂商的 API Key
             </div>
             <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">
             <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🎬 生视频模型</div>
@@ -1173,11 +1184,16 @@
         // ==================== 全局状态 ====================
         let currentImageUrl = '';
         let currentImg2ImgUrl = '';
+        let currentImg2ImgLocalFile = '';  // 图生图结果本地文件名（用于删除）
         let currentVideoUrl = '';
+        let currentVideoLocalFile = '';    // 视频结果本地文件名（用于删除）
+        let videoSizeIndex = 0;            // 视频显示尺寸档位：0=100% 1=50% 2=25%
+        let img2imgSizeIndex = 0;          // 图生图显示尺寸档位：0=100% 1=50% 2=25%
         let videoPollingTimer = null;
         let currentLocalTab = 'pictures';
-        let uploadedImg2ImgUrl = '';   // 图生图上传后的本地图片 URL
-        let uploadedVideoImgUrl = '';  // 视频生成上传后的本地图片 URL
+        let uploadedImg2ImgUrls = [];   // 图生图上传后的本地图片 URL 列表
+        let uploadedVideoImgUrls = [];  // 视频生成上传后的本地图片 URL 列表
+        let _lastDramaRenderHash = '';  // 短剧轮询防重渲染
 
         // ==================== 初始化 ====================
         document.addEventListener('DOMContentLoaded', () => {
@@ -1253,19 +1269,18 @@
                     }
                 });
 
-                // 放下
+                // 放下（支持多文件）
                 zone.addEventListener('drop', (e) => {
                     zone.classList.remove('drag-over');
                     const files = e.dataTransfer.files;
-                    if (files.length > 0) {
-                        handleUploadFile(files[0], type);
+                    for (let fi = 0; fi < files.length; fi++) {
+                        handleUploadFile(files[fi], type);
                     }
                 });
             });
         }
 
         async function handleUploadFile(file, type) {
-            // 验证文件类型
             if (!file.type.startsWith('image/')) {
                 showToast('请上传图片文件', 'error');
                 return;
@@ -1275,23 +1290,17 @@
             try {
                 const formData = new FormData();
                 formData.append('file', file);
-
-                const resp = await fetch('/api/upload/image', {
-                    method: 'POST',
-                    body: formData
-                });
+                const resp = await fetch('/api/upload/image', { method: 'POST', body: formData });
                 const data = await resp.json();
 
                 if (data.success) {
                     const fullUrl = window.location.origin + data.url;
                     if (type === 'img2img') {
-                        uploadedImg2ImgUrl = fullUrl;
-                        document.getElementById('img2imgUrl').value = fullUrl;
-                        showDropZonePreview('img2imgDropZone', data.url);
+                        uploadedImg2ImgUrls.push(fullUrl);
+                        updateMultiImageUI('img2img');
                     } else if (type === 'video') {
-                        uploadedVideoImgUrl = fullUrl;
-                        document.getElementById('videoImageUrl').value = fullUrl;
-                        showDropZonePreview('videoDropZone', data.url);
+                        uploadedVideoImgUrls.push(fullUrl);
+                        updateMultiImageUI('video');
                     }
                     showToast('图片上传成功！', 'success');
                 } else {
@@ -1304,48 +1313,38 @@
             }
         }
 
-        function handleDropZoneFile(input, type) {
+        function handleDropZoneFiles(input, type) {
             if (input.files && input.files.length > 0) {
-                handleUploadFile(input.files[0], type);
+                for (let i = 0; i < input.files.length; i++) {
+                    handleUploadFile(input.files[i], type);
+                }
             }
-            // 重置 input 以便可以重新选择同一文件
             input.value = '';
         }
 
-        function showDropZonePreview(zoneId, imageUrl) {
-            const zone = document.getElementById(zoneId);
-            zone.classList.add('has-image');
-            zone.onclick = null; // 移除点击事件
+        function updateMultiImageUI(type) {
+            const urls = type === 'img2img' ? uploadedImg2ImgUrls : uploadedVideoImgUrls;
+            const thumbsId = type === 'img2img' ? 'img2imgThumbs' : 'videoThumbs';
+            const urlInputId = type === 'img2img' ? 'img2imgUrl' : 'videoImageUrl';
+            const thumbsEl = document.getElementById(thumbsId);
+            if (!thumbsEl) return;
 
-            zone.innerHTML = `
-                <img class="drop-zone-preview" src="${imageUrl}" alt="预览">
-                <button class="drop-zone-remove" onclick="event.stopPropagation(); removeDropZoneImage('${zoneId}', '${zoneId === 'img2imgDropZone' ? 'img2img' : 'video'}')">✕</button>
-            `;
+            thumbsEl.innerHTML = urls.map((u, idx) => {
+                const localPath = u.replace(window.location.origin, '');
+                return `<div style="position:relative;display:inline-block;width:64px;height:64px;">
+                    <img src="${localPath}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">
+                    <button onclick="removeMultiImage('${type}', ${idx})" style="position:absolute;top:-5px;right:-5px;width:18px;height:18px;border-radius:50%;background:var(--error);color:#fff;border:none;cursor:pointer;font-size:10px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;">✕</button>
+                </div>`;
+            }).join('');
+
+            // 同步 URL 输入框
+            document.getElementById(urlInputId).value = urls.join(', ');
         }
 
-        function removeDropZoneImage(zoneId, type) {
-            const zone = document.getElementById(zoneId);
-            zone.classList.remove('has-image');
-            zone.onclick = function() {
-                const inputId = type === 'img2img' ? 'img2imgFileInput' : 'videoFileInput';
-                document.getElementById(inputId).click();
-            };
-
-            zone.innerHTML = `
-                <div class="drop-zone-icon">🖼</div>
-                <div class="drop-zone-text">拖拽图片到此处，或<strong>点击选择</strong></div>
-                <div class="drop-zone-hint">支持 JPG / PNG / GIF / WebP</div>
-                <input type="file" class="upload-input" id="${type === 'img2img' ? 'img2imgFileInput' : 'videoFileInput'}" accept="image/*" onchange="handleDropZoneFile(this, '${type}')">
-            `;
-
-            // 清除对应的 URL
-            if (type === 'img2img') {
-                uploadedImg2ImgUrl = '';
-                document.getElementById('img2imgUrl').value = '';
-            } else if (type === 'video') {
-                uploadedVideoImgUrl = '';
-                document.getElementById('videoImageUrl').value = '';
-            }
+        function removeMultiImage(type, idx) {
+            const urls = type === 'img2img' ? uploadedImg2ImgUrls : uploadedVideoImgUrls;
+            urls.splice(idx, 1);
+            updateMultiImageUI(type);
         }
 
         // ==================== 关闭服务 ====================
@@ -1725,9 +1724,15 @@
 
         async function generateImg2Img() {
             const prompt = document.getElementById('img2imgPrompt').value.trim();
-            const imageUrl = document.getElementById('img2imgUrl').value.trim();
-            if (!prompt || !imageUrl) {
-                showToast('请输入编辑描述和图片URL', 'error');
+            // 支持多张图片：从数组和 URL 输入框合并
+            let imageUrls = [...uploadedImg2ImgUrls];
+            const urlInput = document.getElementById('img2imgUrl').value.trim();
+            if (urlInput) {
+                const extraUrls = urlInput.split(',').map(s => s.trim()).filter(s => s);
+                extraUrls.forEach(u => { if (!imageUrls.includes(u)) imageUrls.push(u); });
+            }
+            if (!prompt || imageUrls.length === 0) {
+                showToast('请输入编辑描述并至少上传一张图片', 'error');
                 return;
             }
 
@@ -1743,12 +1748,13 @@
                 const resp = await fetch('/api/image/img2img', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt, image_url: imageUrl, size, model })
+                    body: JSON.stringify({ prompt, image_urls: imageUrls, size, model })
                 });
                 const data = await resp.json();
 
                 if (data.success && data.image_url) {
                     currentImg2ImgUrl = data.image_url;
+                    currentImg2ImgLocalFile = data.local_file || '';
                     document.getElementById('img2imgResultImg').src = data.image_url;
                     document.getElementById('img2imgResult').classList.add('show');
                     const localSaved = document.getElementById('img2imgLocalSaved');
@@ -1789,6 +1795,43 @@
             });
         }
 
+        function toggleImg2ImgSize() {
+            // 循环切换显示尺寸：完整 -> 缩小一倍(50%) -> 缩小两倍(25%)
+            img2imgSizeIndex = (img2imgSizeIndex + 1) % 3;
+            const sizes = ['100%', '50%', '25%'];
+            const labels = ['📐 尺寸: 完整', '📐 尺寸: 1/2', '📐 尺寸: 1/4'];
+            const img = document.getElementById('img2imgResultImg');
+            img.style.maxWidth = sizes[img2imgSizeIndex];
+            document.getElementById('img2imgSizeBtn').textContent = labels[img2imgSizeIndex];
+        }
+
+        async function deleteImg2Img() {
+            if (!currentImg2ImgLocalFile) {
+                showToast('该图片未保存到本地，无法删除', 'warning');
+                return;
+            }
+            if (!confirm(`确定删除图片 ${currentImg2ImgLocalFile} 吗？删除后不可恢复。`)) return;
+            try {
+                const resp = await fetch('/api/file/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ folder: 'pictures', filename: currentImg2ImgLocalFile })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    document.getElementById('img2imgResult').classList.remove('show');
+                    document.getElementById('img2imgResultImg').src = '';
+                    currentImg2ImgUrl = '';
+                    currentImg2ImgLocalFile = '';
+                    showToast('图片已删除', 'success');
+                } else {
+                    showToast(data.error || '删除失败', 'error');
+                }
+            } catch (e) {
+                showToast('删除请求失败: ' + e.message, 'error');
+            }
+        }
+
         // ==================== 视频生成 ====================
         async function generateVideo() {
             const prompt = document.getElementById('videoPrompt').value.trim();
@@ -1802,7 +1845,13 @@
             const height = parseInt(resolution[1]);
             const numFrames = parseInt(document.getElementById('videoFrames').value);
             const frameRate = parseInt(document.getElementById('videoFrameRate').value);
-            const imageUrl = document.getElementById('videoImageUrl').value.trim();
+            // 支持多张参考图
+            let imageUrls = [...uploadedVideoImgUrls];
+            const urlInput = document.getElementById('videoImageUrl').value.trim();
+            if (urlInput) {
+                const extraUrls = urlInput.split(',').map(s => s.trim()).filter(s => s);
+                extraUrls.forEach(u => { if (!imageUrls.includes(u)) imageUrls.push(u); });
+            }
             const negativePrompt = document.getElementById('videoNegativePrompt').value.trim();
             const model = document.getElementById('videoModelSelect').value;
 
@@ -1811,16 +1860,19 @@
             btn.innerHTML = '<span class="loading-spinner"></span> 提交中...';
 
             try {
+                const body = {
+                    prompt, model, width, height,
+                    num_frames: numFrames,
+                    frame_rate: frameRate,
+                    negative_prompt: negativePrompt || undefined
+                };
+                if (imageUrls.length > 0) {
+                    body.image_urls = imageUrls;
+                }
                 const resp = await fetch('/api/video/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        prompt, model, width, height,
-                        num_frames: numFrames,
-                        frame_rate: frameRate,
-                        image_url: imageUrl || undefined,
-                        negative_prompt: negativePrompt || undefined
-                    })
+                    body: JSON.stringify(body)
                 });
                 const data = await resp.json();
 
@@ -1834,6 +1886,28 @@
 
                     // 开始轮询
                     startVideoPolling(data.task_id);
+                } else if (resp.status === 429 || data.retry_after) {
+                    // 429 速率限制：显示倒计时提示
+                    const waitSec = data.retry_after || 60;
+                    const statusEl = document.getElementById('videoStatusText');
+                    document.getElementById('videoResult').classList.add('show');
+                    statusEl.textContent = `⏳ API 速率限制，请等待 ${waitSec} 秒后重试...`;
+                    statusEl.style.color = 'var(--warning)';
+                    btn.disabled = true;
+                    let remaining = waitSec;
+                    const countdownTimer = setInterval(() => {
+                        remaining--;
+                        if (remaining <= 0) {
+                            clearInterval(countdownTimer);
+                            btn.disabled = false;
+                            btn.innerHTML = '🎬 生成视频';
+                            statusEl.style.color = '';
+                            statusEl.textContent = '可以重新提交视频生成请求';
+                        } else {
+                            statusEl.textContent = `⏳ API 速率限制，请等待 ${remaining} 秒后重试...`;
+                        }
+                    }, 1000);
+                    showToast(data.error || 'API 速率限制，请稍后重试', 'warning');
                 } else {
                     showToast(data.error || '提交失败', 'error');
                 }
@@ -1886,6 +1960,7 @@
 
                         // 优先使用远程 URL，其次使用本地文件
                         currentVideoUrl = data.video_url;
+                        currentVideoLocalFile = data.local_file || '';
                         const localFileUrl = data.local_file ? `/videos/${data.local_file}` : null;
                         const playSrc = currentVideoUrl || localFileUrl;
 
@@ -1929,6 +2004,48 @@
         function downloadVideo() {
             if (!currentVideoUrl) return;
             window.open(currentVideoUrl, '_blank');
+        }
+
+        function toggleVideoSize() {
+            // 循环切换显示尺寸：完整 -> 缩小一倍(50%) -> 缩小两倍(25%)
+            videoSizeIndex = (videoSizeIndex + 1) % 3;
+            const sizes = ['100%', '50%', '25%'];
+            const labels = ['📐 尺寸: 完整', '📐 尺寸: 1/2', '📐 尺寸: 1/4'];
+            const player = document.getElementById('videoResultPlayer');
+            player.style.maxWidth = sizes[videoSizeIndex];
+            document.getElementById('videoSizeBtn').textContent = labels[videoSizeIndex];
+        }
+
+        async function deleteVideo() {
+            if (!currentVideoLocalFile) {
+                showToast('该视频未保存到本地，无法删除', 'warning');
+                return;
+            }
+            if (!confirm(`确定删除视频 ${currentVideoLocalFile} 吗？删除后不可恢复。`)) return;
+            try {
+                const resp = await fetch('/api/file/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ folder: 'videos', filename: currentVideoLocalFile })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    const player = document.getElementById('videoResultPlayer');
+                    player.pause();
+                    player.removeAttribute('src');
+                    player.load();
+                    player.style.display = 'none';
+                    document.getElementById('videoResultActions').style.display = 'none';
+                    document.getElementById('videoStatusText').textContent = '视频已删除';
+                    currentVideoUrl = '';
+                    currentVideoLocalFile = '';
+                    showToast('视频已删除', 'success');
+                } else {
+                    showToast(data.error || '删除失败', 'error');
+                }
+            } catch (e) {
+                showToast('删除请求失败: ' + e.message, 'error');
+            }
         }
 
         function copyVideoUrl() {
@@ -2538,6 +2655,14 @@
             }
         }
 
+        function toggleCustomCharacterStyle() {
+            const select = document.getElementById('dramaCharacterStyle');
+            const customInput = document.getElementById('dramaCustomCharacterStyle');
+            if (select && customInput) {
+                customInput.style.display = select.value === 'custom' ? 'block' : 'none';
+            }
+        }
+
         async function startDrama() {
             const prompt = document.getElementById('dramaPrompt').value.trim();
             if (!prompt) { showToast('请输入短剧描述', 'error'); return; }
@@ -2547,12 +2672,24 @@
             const imageModel = document.getElementById('dramaImageModel').value;
             const videoModel = document.getElementById('dramaVideoModel').value;
             const characterStyle = document.getElementById('dramaCharacterStyle').value;
+            // 如果选择了自定义风格，获取用户输入的风格描述
+            let customCharacterStyle = '';
+            if (characterStyle === 'custom') {
+                customCharacterStyle = document.getElementById('dramaCustomCharacterStyle').value.trim();
+                if (!customCharacterStyle) {
+                    showToast('请输入自定义角色风格描述', 'error');
+                    btn.disabled = false;
+                    btn.innerHTML = '🚀 启动短剧生成';
+                    return;
+                }
+            }
             const btn = document.getElementById('btnStartDrama');
             btn.disabled = true;
             btn.innerHTML = '<span class="loading-spinner"></span> 启动中...';
 
             // 重置进度显示
             storyConfirmed = false;
+            _lastDramaRenderHash = '';
             document.getElementById('dramaProgress').style.display = 'block';
             document.getElementById('dramaScriptSection').style.display = 'none';
             document.getElementById('dramaStorySection').style.display = 'none';
@@ -2571,7 +2708,7 @@
                 const resp = await fetch('/api/drama/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt, shot_duration: shotDuration, text_model: textModel, image_model: imageModel, video_model: videoModel, character_style: characterStyle })
+                    body: JSON.stringify({ prompt, shot_duration: shotDuration, text_model: textModel, image_model: imageModel, video_model: videoModel, character_style: characterStyle, custom_character_style: customCharacterStyle })
                 });
                 const data = await resp.json();
                 if (data.success) {
@@ -2626,6 +2763,48 @@
                 const resp = await fetch(`/api/drama/status/${currentDramaId}`);
                 const data = await resp.json();
                 if (!data.success) return;
+
+                // 防重渲染：计算当前数据哈希，如果与上次相同则跳过 DOM 更新
+                const hashParts = [
+                    data.status,
+                    data.message || '',
+                    data.story ? data.story.substring(0, 100) : '',
+                    data.script ? (typeof data.script === 'string' ? data.script.substring(0, 100) : JSON.stringify(data.script).substring(0, 100)) : '',
+                    JSON.stringify(data.storyboard || {}).substring(0, 200),
+                    JSON.stringify(data.assets || []).substring(0, 200),
+                    JSON.stringify(data.video_results || []).substring(0, 300),
+                    data.merged_video || ''
+                ];
+                const currentHash = hashParts.join('|');
+                if (currentHash === _lastDramaRenderHash) {
+                    // 数据未变化，只更新进度条和步骤标签
+                    const stepMap = { 'step1': 15, 'paused_story': 18, 'step2': 35, 'step3': 55, 'paused': 60, 'paused_video': 65, 'step4': 75, 'completed': 100, 'failed': 100, 'stopped': 100 };
+                    const progress = stepMap[data.status] || 5;
+                    document.getElementById('dramaProgressBar').style.width = progress + '%';
+                    if (data.status === 'failed') document.getElementById('dramaProgressBar').style.background = 'var(--error)';
+                    if (data.status === 'completed') document.getElementById('dramaProgressBar').style.background = 'var(--success)';
+                    if (data.status === 'stopped') document.getElementById('dramaProgressBar').style.background = 'var(--text2)';
+                    const stepLabels = {
+                        'pending': '等待中', 'step1': '① 生成故事+剧本...', 'paused_story': '⏸ 请确认故事梗概', 'step2': '② 生成分镜...',
+                        'step3': '③ 提取素材...', 'paused': '⏸ 请确认参考图', 'paused_video': '⏸ 请逐个启动视频生成', 'step4': '④ 生成视频...', 'completed': '✅ 完成', 'failed': '❌ 失败', 'stopped': '⏹ 已停止'
+                    };
+                    document.getElementById('dramaStepBadge').textContent = stepLabels[data.status] || data.status;
+                    document.getElementById('dramaMessage').textContent = data.message || '';
+                    // 完成或失败时停止轮询
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        clearInterval(dramaPollingTimer);
+                        localStorage.removeItem('currentDramaId');
+                        showToast(data.status === 'completed' ? '短剧生成完成！' : '短剧生成失败', data.status === 'completed' ? 'success' : 'error');
+                    }
+                    return;
+                }
+                _lastDramaRenderHash = currentHash;
+
+                // 防编辑中断：如果用户正在编辑任何 textarea 或 input，跳过本次 DOM 重渲染
+                const activeEl = document.activeElement;
+                if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
+                    return;
+                }
 
                 // 更新进度条
                 const stepMap = { 'step1': 15, 'paused_story': 18, 'step2': 35, 'step3': 55, 'paused': 60, 'paused_video': 65, 'step4': 75, 'completed': 100, 'failed': 100, 'stopped': 100 };
@@ -3101,7 +3280,7 @@
                 resultEl.style.display = 'block';
                 const videoUrl = `/anchor/${currentAnchorTaskId}/${task.output_file}`;
                 resultContent.innerHTML = `
-                    <video controls style="width:100%;max-width:600px;border-radius:var(--radius-sm);" src="${videoUrl}"></video>
+                    <video controls style="width:100%;max-width:300px;border-radius:var(--radius-sm);" src="${videoUrl}"></video>
                     <div style="margin-top:8px;">
                         <a href="${videoUrl}" download style="color:var(--accent);font-size:13px;">📥 下载视频</a>
                     </div>

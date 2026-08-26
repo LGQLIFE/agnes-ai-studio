@@ -81,14 +81,26 @@ def generate_image():
 
 @image_bp.route('/api/image/img2img', methods=['POST'])
 def img2img():
-    """图生图 / 图片编辑"""
+    """图生图 / 图片编辑（支持多张参考图）"""
     data = request.get_json()
     prompt = data.get('prompt', '').strip()
-    image_url = data.get('image_url', '').strip()
-    if not prompt or not image_url:
-        return jsonify({'success': False, 'error': '请输入描述和图片URL'}), 400
+    # 支持多张图片：优先使用 image_urls 数组，兼容旧的 image_url 单张
+    image_urls = data.get('image_urls', [])
+    if not image_urls:
+        single_url = data.get('image_url', '').strip()
+        if single_url:
+            image_urls = [single_url]
+    if not prompt or not image_urls:
+        return jsonify({'success': False, 'error': '请输入描述并至少提供一张图片'}), 400
 
-    image_url = resolve_image_url(image_url)
+    # 转换本地图片为 base64
+    resolved_urls = []
+    for u in image_urls:
+        resolved = resolve_image_url(u.strip()) if isinstance(u, str) else u
+        if resolved:
+            resolved_urls.append(resolved)
+    if not resolved_urls:
+        return jsonify({'success': False, 'error': '图片URL无效'}), 400
 
     size = data.get('size', '1024x768')
     save_local = data.get('save_local', True)
@@ -110,7 +122,7 @@ def img2img():
             'size': size,
             'extra_body': {
                 'tags': ['img2img'],
-                'image': [image_url],
+                'image': resolved_urls,  # 支持多张图片
                 'response_format': 'url'
             }
         }

@@ -14,7 +14,7 @@ from ..config import get_app_dir, get_vendor_base_url, BASE_URL, shutdown_event
 from ..models import video_tasks, task_lock
 
 
-def download_video_by_video_id(video_id, base_url, headers, subdir, prefix):
+def download_video_by_video_id(video_id, base_url, headers, subdir, prefix, model_name=None):
     """通过 video_id 使用 /agnesapi 端点下载视频
     
     Args:
@@ -23,15 +23,19 @@ def download_video_by_video_id(video_id, base_url, headers, subdir, prefix):
         headers: 请求头
         subdir: 保存子目录
         prefix: 文件名前缀
+        model_name: 模型名称（可选，用于 agnes-video-2.5 等新 API）
     
     Returns:
         保存后的文件名，失败返回 None
     """
     try:
         print(f"[视频下载] 通过 video_id 获取视频: {video_id[:50]}...")
-        # 尝试新端点 /agnesapi?video_id=<VIDEO_ID>
+        # 构建请求参数
+        params = {'video_id': video_id}
+        if model_name:
+            params['model_name'] = model_name
         agnesapi_url = f'{base_url}/agnesapi'
-        resp = requests.get(agnesapi_url, headers=headers, params={'video_id': video_id}, timeout=(30, 120), stream=True)
+        resp = requests.get(agnesapi_url, headers=headers, params=params, timeout=(30, 120), stream=True)
         
         if resp.status_code == 200:
             content_type = resp.headers.get('Content-Type', '')
@@ -173,23 +177,97 @@ def download_and_save_file(url, subdir, prefix, ext, max_retries=3):
     return None
 
 
-def poll_video_status(task_id, api_key, model=None):
-    """后台轮询视频生成状态"""
+def poll_video_status(task_id, api_key, model=None, video_id=None):
+    """后台轮询视频生成状态
+    
+    Args:
+        task_id: 任务 ID（从 POST /videos 返回）
+        api_key: API Key
+        model: 模型名称
+        video_id: 视频 ID（用于 agnes-video-2.5 等新 API）
+    """
     headers = {'Authorization': f'Bearer {api_key}'}
     base_url = get_vendor_base_url(model) if model else BASE_URL
     max_polls = 120
     poll_interval = 10
+    
+    # 判断是否使用新的 /agnesapi 查询端点（agnes-video-2.5 / agnes-video-2.5-flash）
+    use_agnesapi_poll = model and model.startswith('agnes-video-2.5') and video_id
+    # MiniMax 视频生成：使用 V2 查询接口 GET /v2/query/video_generation/{task_id}
+    use_minimax_poll = bool(model) and model.lower().startswith('minimax')
+    minimax_api_root = base_url.rstrip('/')
+    if minimax_api_root.endswith('/v1'):
+        minimax_api_root = minimax_api_root[:-3]
 
     for i in range(max_polls):
         if shutdown_event.wait(timeout=poll_interval):
             print(f"[轮询] 收到关闭信号，退出轮询 task_id={task_id}")
             return
         try:
-            resp = requests.get(
-                f'{base_url}/videos/{task_id}',
-                headers=headers,
-                timeout=30
-            )
+            # MiniMax V2 视频生成查询（MiniMax-H3）
+            if use_minimax_poll:
+                resp = requests.get(
+                    f'{minimax_api_root}/v2/query/video_generation/{task_id}',
+                    headers=headers,
+                    timeout=30
+                )
+                if resp.status_code == 200:
+                    q_result = resp.json()
+                    task_obj = q_result.get('task', {}) or {}
+                    mm_status = task_obj.get('status', '')
+                    status = {
+                        'succeeded': 'completed',
+                        'failed': 'failed',
+                        'cancelled': 'failed',
+                        'running': 'in_progress'
+                    }.get(mm_status, 'queued')
+
+                    with task_lock:
+                        if task_id in video_tasks:
+                            video_tasks[task_id]['status'] = status
+
+                    if status == 'completed':
+                        video_url = (task_obj.get('content') or {}).get('url', '')
+                        print(f"[视频URL] MiniMax task_id={task_id}: {video_url[:150] if video_url else '(未获取到)'}")
+                        local_filename = None
+                        if video_url:
+                            local_filename = download_and_save_file(video_url, 'videos', 'video', 'mp4')
+                        with task_lock:
+                            if task_id in video_tasks:
+                                video_tasks[task_id]['result'] = {
+                                    'video_url': video_url,
+                                    'local_file': local_filename,
+                                    'raw_response': q_result
+                                }
+                        return
+                    elif status == 'failed':
+                        err_msg = task_obj.get('error') or task_obj.get('fail_reason') or '生成失败'
+                        with task_lock:
+                            if task_id in video_tasks:
+                                video_tasks[task_id]['result'] = {'error': str(err_msg)}
+                        return
+                elif resp.status_code == 429:
+                    # 查询限流，等待后重试即可，不算失败
+                    continue
+                else:
+                    print(f"[轮询] MiniMax 查询接口返回 {resp.status_code}: {resp.text[:200]}")
+                continue
+
+            # agnes-video-2.5: 使用 /agnesapi?video_id=<VIDEO_ID>&model_name=agnes-video-2.5 查询
+            if use_agnesapi_poll:
+                resp = requests.get(
+                    f'{base_url}/agnesapi',
+                    headers=headers,
+                    params={'video_id': video_id, 'model_name': model},
+                    timeout=30
+                )
+            else:
+                # 传统方式：GET /videos/{task_id}
+                resp = requests.get(
+                    f'{base_url}/videos/{task_id}',
+                    headers=headers,
+                    timeout=30
+                )
 
             if resp.status_code == 200:
                 result = resp.json()
@@ -237,12 +315,18 @@ def poll_video_status(task_id, api_key, model=None):
                                 local_filename = download_and_save_file(
                                     video_url, 'videos', 'video', 'mp4'
                                 )
-                            elif result.get('video_id'):
-                                # 新 API 格式：通过 video_id 下载
-                                video_id = result['video_id']
-                                print(f"[视频下载] 使用 video_id: {video_id[:50]}...")
+                            elif use_agnesapi_poll:
+                                # agnes-video-2.5: /agnesapi 直接返回视频流
+                                print(f"[视频下载] agnes-video-2.5 通过 /agnesapi 下载视频: {video_id[:50]}...")
                                 local_filename = download_video_by_video_id(
-                                    video_id, base_url, headers, 'videos', 'video'
+                                    video_id, base_url, headers, 'videos', 'video', model_name=model
+                                )
+                            elif result.get('video_id'):
+                                # 其他模型的新 API 格式：通过 video_id 下载
+                                vid_id = result['video_id']
+                                print(f"[视频下载] 使用 video_id: {vid_id[:50]}...")
+                                local_filename = download_video_by_video_id(
+                                    vid_id, base_url, headers, 'videos', 'video'
                                 )
 
                             video_tasks[task_id]['result'] = {

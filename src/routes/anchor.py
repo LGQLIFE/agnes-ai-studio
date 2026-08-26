@@ -254,7 +254,7 @@ def _anchor_pipeline(task_id):
         os.makedirs(visual_dir, exist_ok=True)
 
         if mode == 'A':
-            success = _mode_a_static_image(task_id, avatar_file, segments, visual_dir)
+            success = _mode_a_static_image(task_id, avatar_file, segments, visual_dir, api_key, video_model)
         elif mode == 'B':
             success = _mode_b_video_material(task_id, avatar_file, segments, visual_dir)
         else:
@@ -285,9 +285,14 @@ def _anchor_pipeline(task_id):
             duration = seg.get('duration', 5)
             subtitle_text = seg['text'][:200]  # 字幕取前200字
 
+            # 获取视频尺寸（模式A会根据图片尺寸动态设置，其他模式用默认值）
+            with anchor_lock:
+                vid_w = anchor_tasks[task_id].get('video_width', 1152)
+                vid_h = anchor_tasks[task_id].get('video_height', 768)
+
             success = _compose_segment_video(
                 ffmpeg, visual_path, audio_path, subtitle_text,
-                duration, output_path, mode
+                duration, output_path, mode, video_width=vid_w, video_height=vid_h
             )
             if success:
                 segment_videos.append(output_path)
@@ -396,8 +401,64 @@ def _fallback_segment(script):
 
 # ==================== Step 3: 三种画面模式 ====================
 
-def _mode_a_static_image(task_id, avatar_file, segments, visual_dir):
-    """模式 A：静态形象图 — 将图片循环/延长至每段音频时长"""
+def _get_image_dimensions(image_path):
+    """检测图片尺寸，返回 (width, height)"""
+    try:
+        # 尝试用 PIL
+        from PIL import Image
+        with Image.open(image_path) as img:
+            return img.size  # (width, height)
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[数字人] PIL 检测图片尺寸失败: {e}")
+    
+    # 回退到 ffprobe
+    try:
+        from ..services.video_merge import get_ffprobe_path
+        ffprobe = get_ffprobe_path()
+        if ffprobe:
+            cmd = [ffprobe, '-v', 'error', '-select_streams', 'v:0',
+                   '-show_entries', 'stream=width,height',
+                   '-of', 'csv=p=0', image_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and result.stdout.strip():
+                parts = result.stdout.strip().split(',')
+                if len(parts) == 2:
+                    return int(parts[0]), int(parts[1])
+    except Exception as e:
+        print(f"[数字人] ffprobe 检测图片尺寸失败: {e}")
+    
+    return None, None
+
+
+def _calc_video_dimensions(img_w, img_h):
+    """根据图片尺寸计算合适的视频尺寸，保持宽高比，长边不超过 1152"""
+    if not img_w or not img_h or img_w <= 0 or img_h <= 0:
+        return 1152, 768  # 默认 3:2
+    
+    # 目标长边 1152，短边按比例缩放并对齐到 8 的倍数（视频编码要求）
+    max_side = 1152
+    if img_w >= img_h:
+        out_w = max_side
+        out_h = int(img_h * max_side / img_w)
+    else:
+        out_h = max_side
+        out_w = int(img_w * max_side / img_h)
+    
+    # 对齐到 8 的倍数
+    out_w = max(64, (out_w // 8) * 8)
+    out_h = max(64, (out_h // 8) * 8)
+    
+    return out_w, out_h
+
+def _mode_a_static_image(task_id, avatar_file, segments, visual_dir, api_key=None, video_model=None):
+    """模式 A：静态形象图 — 使用 Agnes Video I2V 生成动态画面（人物动作+表情变化）
+    
+    如果 I2V 失败，自动回退到 Ken Burns 效果。
+    """
+    import base64
+    
     app_dir = get_app_dir()
     image_path = os.path.join(app_dir, 'anchor', avatar_file)
     if not os.path.exists(image_path):
@@ -409,8 +470,48 @@ def _mode_a_static_image(task_id, avatar_file, segments, visual_dir):
             visual_path = os.path.join(visual_dir, f'seg_{i:03d}.mp4')
             seg['visual_path'] = visual_path
 
-    # 为每段生成图片循环视频
+    # 检测图片尺寸，计算视频尺寸以保持宽高比一致
+    img_w, img_h = _get_image_dimensions(image_path)
+    vid_w, vid_h = _calc_video_dimensions(img_w, img_h)
+    print(f"[数字人 {task_id}] 模式A 图片尺寸={img_w}x{img_h}，视频尺寸={vid_w}x{vid_h}")
+    
+    # 将尺寸存储到任务数据中，供后续合成使用
+    with anchor_lock:
+        anchor_tasks[task_id]['video_width'] = vid_w
+        anchor_tasks[task_id]['video_height'] = vid_h
+
+    # 将本地图片转为 base64 data URL（供 I2V API 使用）
+    image_base64 = None
+    try:
+        ext = os.path.splitext(avatar_file)[1].lower()
+        mime_map = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
+        mime = mime_map.get(ext, 'image/png')
+        with open(image_path, 'rb') as f:
+            b64_data = base64.b64encode(f.read()).decode('utf-8')
+        image_base64 = f'data:{mime};base64,{b64_data}'
+        print(f"[数字人 {task_id}] 模式A 图片已转base64 ({len(b64_data)//1024}KB)")
+    except Exception as e:
+        print(f"[数字人 {task_id}] 模式A 图片转base64失败: {e}")
+
+    # I2V 提示词：描述人物自然说话的状态
+    i2v_prompt = (
+        "A person speaking naturally to camera, subtle head movements, "
+        "natural facial expressions, mouth moving as if talking, "
+        "gentle body sway, professional presenter style, "
+        "steady eye contact with camera, smooth breathing motion"
+    )
+
+    # 如果有 API 配置，尝试使用 I2V 生成动态视频
+    use_i2v = api_key and video_model and image_base64
+    if use_i2v:
+        base_url = get_vendor_base_url(video_model)
+        headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+
     ffmpeg = get_ffmpeg_path()
+    
+    # 记录上次视频请求时间，用于速率限制控制（2 requests/min）
+    _last_video_request_time = 0
+    
     for i, seg in enumerate(segments):
         if shutdown_event.is_set():
             return False
@@ -418,31 +519,170 @@ def _mode_a_static_image(task_id, avatar_file, segments, visual_dir):
         if duration < 1:
             duration = 5
         visual_path = os.path.join(visual_dir, f'seg_{i:03d}.mp4')
+        seg_text = seg.get('text', '')
 
-        # 用 ffmpeg 将静态图片生成指定时长的视频
-        cmd = [
-            ffmpeg, '-y',
-            '-loop', '1', '-i', image_path,
-            '-t', str(duration),
-            '-vf', 'scale=1152:768:force_original_aspect_ratio=decrease,pad=1152:768:(ow-iw)/2:(oh-ih)/2:black',
-            '-c:v', 'libx264', '-tune', 'stillimage',
-            '-pix_fmt', 'yuv420p',
-            '-r', '24',
-            visual_path
-        ]
-        try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            _, stderr = proc.communicate(timeout=60)
-            if proc.returncode == 0 and os.path.exists(visual_path) and os.path.getsize(visual_path) > 0:
-                print(f"[数字人 {task_id}] 模式A 第 {i+1} 段画面生成完成 ({duration:.1f}s)")
+        i2v_success = False
+        
+        # 尝试使用 I2V API 生成动态视频
+        if use_i2v:
+            # 速率限制控制：确保两次请求间隔至少 35 秒
+            elapsed = time.time() - _last_video_request_time
+            if elapsed < 35 and _last_video_request_time > 0:
+                wait_sec = 35 - elapsed
+                print(f"[数字人 {task_id}] 模式A 速率限制保护：等待 {wait_sec:.0f} 秒...")
+                _update_anchor(task_id, message=f'等待 API 限流恢复 ({wait_sec:.0f}s)...')
+                time.sleep(wait_sec)
+            _last_video_request_time = time.time()
+            _update_anchor(task_id, message=f'AI 生成第 {i+1}/{len(segments)} 段动态画面...')
+            num_frames = min(int(duration * 24) // 8 * 8 + 1, 441)
+            
+            if video_model.startswith('agnes-video-2.5'):
+                # Agnes Video 2.5 新参数格式：首帧图生视频（keyframe 模式）
+                payload = {
+                    'model': video_model,
+                    'prompt': i2v_prompt,
+                    'mode': 'keyframe',
+                    'first_frame': image_base64,
+                    'seconds': str(max(4, min(12, round(duration)))),
+                    'size': '720P',
+                }
             else:
-                err = stderr.decode('utf-8', errors='replace')[:300]
-                print(f"[数字人 {task_id}] 模式A 第 {i+1} 段画面失败: {err}")
-                _update_anchor(task_id, status='failed', message=f'第 {i+1} 段画面生成失败')
+                payload = {
+                    'model': video_model,
+                    'prompt': i2v_prompt,
+                    'image': image_base64,
+                    'width': vid_w,
+                    'height': vid_h,
+                    'num_frames': num_frames,
+                    'frame_rate': 24,
+                }
+            
+            max_retries = 2
+            for attempt in range(max_retries):
+                if shutdown_event.is_set():
+                    return False
+                print(f"[数字人 {task_id}] 模式A I2V 第 {i+1} 段 (尝试 {attempt+1}/{max_retries})")
+                try:
+                    resp = requests.post(f'{base_url}/videos', headers=headers, json=payload, timeout=60)
+                    if resp.status_code != 200:
+                        print(f"[数字人 {task_id}] I2V API错误: {resp.status_code} {resp.text[:200]}")
+                        if attempt < max_retries - 1:
+                            # 429/503 需要更长等待时间
+                            if resp.status_code in (429, 503):
+                                wait_time = 60 * (attempt + 1)
+                                print(f"[数字人 {task_id}] 速率限制/队列满，等待 {wait_time} 秒...")
+                                time.sleep(wait_time)
+                            else:
+                                time.sleep(3)
+                            continue
+                        break
+                    
+                    result = resp.json()
+                    task_api_id = result.get('id') or result.get('task_id') or result.get('video_id', '')
+                    vid_id = result.get('video_id') or result.get('id', '')
+                    if not task_api_id:
+                        print(f"[数字人 {task_id}] I2V 未获取到任务ID")
+                        break
+                    
+                    # 轮询等待视频完成
+                    video_url = _poll_video(task_api_id, base_url, headers, task_id, i, video_model=video_model, video_id=vid_id)
+                    if not video_url:
+                        if attempt < max_retries - 1:
+                            time.sleep(3)
+                            continue
+                        break
+                    
+                    # 下载视频
+                    local_file = None
+                    if video_url == '__VIDEO_STREAM__':
+                        # agnes-video-2.5: 直接从 /agnesapi 下载视频流
+                        local_file = download_video_by_video_id(
+                            vid_id, base_url, headers,
+                            os.path.join('anchor', task_id, 'visuals'), f'seg_{i:03d}',
+                            model_name=video_model
+                        )
+                    elif video_url and video_url.startswith('http'):
+                        local_file = download_and_save_file(video_url, os.path.join('anchor', task_id, 'visuals'), f'seg_{i:03d}', 'mp4')
+                    elif result.get('video_id'):
+                        local_file = download_video_by_video_id(
+                            result['video_id'], base_url, headers,
+                            os.path.join('anchor', task_id, 'visuals'), f'seg_{i:03d}'
+                        )
+                    
+                    if local_file:
+                        full_path = os.path.join(app_dir, 'anchor', task_id, 'visuals', local_file)
+                        with anchor_lock:
+                            anchor_tasks[task_id]['segments'][i]['visual_path'] = full_path
+                        print(f"[数字人 {task_id}] 模式A I2V 第 {i+1} 段画面完成")
+                        i2v_success = True
+                        break
+                    else:
+                        print(f"[数字人 {task_id}] I2V 视频下载失败")
+                        
+                except Exception as e:
+                    print(f"[数字人 {task_id}] I2V 异常: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(3)
+                        continue
+        
+        # 如果 I2V 失败，回退到 Ken Burns 效果
+        if not i2v_success:
+            print(f"[数字人 {task_id}] 模式A 第 {i+1} 段回退到 Ken Burns 效果")
+            # Ken Burns 效果参数
+            ken_burns_effects = [
+                ('in', 'iw/2-(iw/zoom/2)', 'ih/2-(ih/zoom/2)'),
+                ('out', 'iw/2-(iw/zoom/2)', 'ih/2-(ih/zoom/2)'),
+                ('in', '0', 'ih/2-(ih/zoom/2)'),
+                ('in', 'iw-iw/zoom', 'ih/2-(ih/zoom/2)'),
+            ]
+            effect_idx = i % len(ken_burns_effects)
+            zoom_dir, x_expr, y_expr = ken_burns_effects[effect_idx]
+            total_frames = int(duration * 24)
+            if zoom_dir == 'in':
+                zoom_expr = f'min(zoom+0.0015,1.2)'
+            else:
+                zoom_expr = f'if(eq(on,1),1.2,max(zoom-0.0015,1.0))'
+            
+            vf = (
+                f'scale={vid_w}:{vid_h}:force_original_aspect_ratio=decrease,'
+                f'pad={vid_w}:{vid_h}:(ow-iw)/2:(oh-ih)/2:black,'
+                f'zoompan=z=\'{zoom_expr}\':x=\'{x_expr}\':y=\'{y_expr}\':'
+                f'd={total_frames}:s={vid_w}x{vid_h}:fps=24'
+            )
+            cmd = [
+                ffmpeg, '-y',
+                '-loop', '1', '-i', image_path,
+                '-t', str(duration),
+                '-vf', vf,
+                '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                '-r', '24',
+                visual_path
+            ]
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                _, stderr = proc.communicate(timeout=120)
+                if proc.returncode == 0 and os.path.exists(visual_path) and os.path.getsize(visual_path) > 0:
+                    print(f"[数字人 {task_id}] 模式A 第 {i+1} 段 Ken Burns 效果完成")
+                else:
+                    # 最终回退到静态图片
+                    cmd_fallback = [
+                        ffmpeg, '-y',
+                        '-loop', '1', '-i', image_path,
+                        '-t', str(duration),
+                        '-vf', 'scale=1152:768:force_original_aspect_ratio=decrease,pad=1152:768:(ow-iw)/2:(oh-ih)/2:black',
+                        '-c:v', 'libx264', '-tune', 'stillimage',
+                        '-pix_fmt', 'yuv420p', '-r', '24',
+                        visual_path
+                    ]
+                    proc2 = subprocess.Popen(cmd_fallback, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    proc2.communicate(timeout=60)
+                    if proc2.returncode != 0:
+                        _update_anchor(task_id, status='failed', message=f'第 {i+1} 段画面生成失败')
+                        return False
+            except Exception as e:
+                print(f"[数字人 {task_id}] 模式A Ken Burns 异常: {e}")
                 return False
-        except Exception as e:
-            print(f"[数字人 {task_id}] 模式A 异常: {e}")
-            return False
 
     return True
 
@@ -513,8 +753,10 @@ def _mode_b_video_material(task_id, avatar_file, segments, visual_dir):
     return True
 
 
-def _mode_c_ai_generate(task_id, video_prompt, segments, visual_dir, api_key, video_model='agnes-video-v2.0'):
+def _mode_c_ai_generate(task_id, video_prompt, segments, visual_dir, api_key, video_model=None):
     """模式 C：AI 生成画面 — 为每段调用 Agnes Video API 生成画面"""
+    if not video_model:
+        video_model = DEFAULT_VIDEO_MODEL
     base_url = get_vendor_base_url(video_model)
     headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
 
@@ -522,10 +764,22 @@ def _mode_c_ai_generate(task_id, video_prompt, segments, visual_dir, api_key, vi
         for i, seg in enumerate(anchor_tasks[task_id]['segments']):
             seg['visual_path'] = os.path.join(visual_dir, f'seg_{i:03d}.mp4')
 
+    # 记录上次视频请求时间，用于速率限制控制（2 requests/min）
+    _last_video_request_time = 0
+    
     for i, seg in enumerate(segments):
         if shutdown_event.is_set():
             return False
 
+        # 速率限制控制：确保两次请求间隔至少 35 秒
+        elapsed = time.time() - _last_video_request_time
+        if elapsed < 35 and _last_video_request_time > 0:
+            wait_sec = 35 - elapsed
+            print(f"[数字人 {task_id}] 模式C 速率限制保护：等待 {wait_sec:.0f} 秒...")
+            _update_anchor(task_id, message=f'等待 API 限流恢复 ({wait_sec:.0f}s)...')
+            time.sleep(wait_sec)
+        _last_video_request_time = time.time()
+        
         _update_anchor(task_id, message=f'AI 生成第 {i+1}/{len(segments)} 段画面...')
         seg_text = seg['text']
         duration = seg.get('duration', 5)
@@ -537,14 +791,25 @@ def _mode_c_ai_generate(task_id, video_prompt, segments, visual_dir, api_key, vi
         # 限制帧数：8n+1 规则，按每秒24帧计算
         num_frames = min(int(duration * 24) // 8 * 8 + 1, 441)
 
-        payload = {
-            'model': video_model,
-            'prompt': prompt[:1000],  # 限制提示词长度
-            'width': 1152,
-            'height': 768,
-            'num_frames': num_frames,
-            'frame_rate': 24,
-        }
+        if video_model.startswith('agnes-video-2.5'):
+            # Agnes Video 2.5 新参数格式：纯文生视频（text 模式）
+            payload = {
+                'model': video_model,
+                'prompt': prompt[:1000],
+                'mode': 'text',
+                'seconds': str(max(4, min(12, round(duration)))),
+                'size': '720P',
+                'aspect_ratio': '16:9',
+            }
+        else:
+            payload = {
+                'model': video_model,
+                'prompt': prompt[:1000],  # 限制提示词长度
+                'width': 1152,
+                'height': 768,
+                'num_frames': num_frames,
+                'frame_rate': 24,
+            }
 
         # 重试机制：最多重试 3 次
         max_retries = 3
@@ -560,7 +825,13 @@ def _mode_c_ai_generate(task_id, video_prompt, segments, visual_dir, api_key, vi
                 if resp.status_code != 200:
                     print(f"[数字人 {task_id}] 视频API错误: {resp.status_code} {resp.text[:200]}")
                     if attempt < max_retries - 1:
-                        time.sleep(3)
+                        # 429/503 需要更长等待时间
+                        if resp.status_code in (429, 503):
+                            wait_time = 60 * (attempt + 1)
+                            print(f"[数字人 {task_id}] 速率限制/队列满，等待 {wait_time} 秒...")
+                            time.sleep(wait_time)
+                        else:
+                            time.sleep(3)
                         continue
                     else:
                         print(f"[数字人 {task_id}] 第 {i+1} 段视频生成失败（已重试 {max_retries} 次），继续执行下一步")
@@ -568,6 +839,7 @@ def _mode_c_ai_generate(task_id, video_prompt, segments, visual_dir, api_key, vi
 
                 result = resp.json()
                 task_api_id = result.get('id') or result.get('task_id') or result.get('video_id', '')
+                vid_id = result.get('video_id') or result.get('id', '')
                 if not task_api_id:
                     print(f"[数字人 {task_id}] 未获取到任务ID: {json.dumps(result)[:200]}")
                     if attempt < max_retries - 1:
@@ -578,7 +850,7 @@ def _mode_c_ai_generate(task_id, video_prompt, segments, visual_dir, api_key, vi
                         break
 
                 # 轮询等待视频完成
-                video_url = _poll_video(task_api_id, base_url, headers, task_id, i)
+                video_url = _poll_video(task_api_id, base_url, headers, task_id, i, video_model=video_model, video_id=vid_id)
                 if not video_url:
                     if attempt < max_retries - 1:
                         print(f"[数字人 {task_id}] 第 {i+1} 段视频轮询失败，重试...")
@@ -591,7 +863,13 @@ def _mode_c_ai_generate(task_id, video_prompt, segments, visual_dir, api_key, vi
                 # 下载视频
                 visual_path = os.path.join(visual_dir, f'seg_{i:03d}.mp4')
                 local_file = None
-                if video_url.startswith('http'):
+                if video_url == '__VIDEO_STREAM__':
+                    local_file = download_video_by_video_id(
+                        vid_id, base_url, headers,
+                        os.path.join('anchor', task_id, 'visuals'), f'seg_{i:03d}',
+                        model_name=video_model
+                    )
+                elif video_url and video_url.startswith('http'):
                     local_file = download_and_save_file(video_url, os.path.join('anchor', task_id, 'visuals'), f'seg_{i:03d}', 'mp4')
                 elif result.get('video_id'):
                     local_file = download_video_by_video_id(
@@ -634,16 +912,40 @@ def _mode_c_ai_generate(task_id, video_prompt, segments, visual_dir, api_key, vi
     return True
 
 
-def _poll_video(task_api_id, base_url, headers, task_id, seg_idx):
-    """轮询视频生成状态"""
+def _poll_video(task_api_id, base_url, headers, task_id, seg_idx, video_model=None, video_id=None):
+    """轮询视频生成状态
+    
+    Args:
+        task_api_id: 任务 ID
+        video_model: 视频模型名称
+        video_id: 视频 ID（用于 agnes-video-2.5 等新 API）
+    """
     max_polls = 60
+    # 判断是否使用 /agnesapi 查询端点
+    use_agnesapi = video_model and video_model.startswith('agnes-video-2.5') and video_id
+    
     for poll in range(max_polls):
         if shutdown_event.is_set():
             return None
         time.sleep(5)
         try:
-            resp = requests.get(f'{base_url}/videos/{task_api_id}', headers=headers, timeout=30)
+            if use_agnesapi:
+                resp = requests.get(
+                    f'{base_url}/agnesapi',
+                    headers=headers,
+                    params={'video_id': video_id, 'model_name': video_model},
+                    timeout=30
+                )
+            else:
+                resp = requests.get(f'{base_url}/videos/{task_api_id}', headers=headers, timeout=30)
+            
             if resp.status_code == 200:
+                # 检查是否是直接的视频流（agnes-video-2.5 完成时可能直接返回视频）
+                content_type = resp.headers.get('Content-Type', '')
+                if 'video' in content_type or 'octet-stream' in content_type:
+                    print(f"[数字人 {task_id}] 第 {seg_idx+1} 段 /agnesapi 返回视频流")
+                    return '__VIDEO_STREAM__'  # 特殊标记，表示需要直接从 /agnesapi 下载
+                
                 data = resp.json()
                 status = data.get('status', '')
                 if status == 'completed':
@@ -654,7 +956,6 @@ def _poll_video(task_api_id, base_url, headers, task_id, seg_idx):
                     if not video_url and isinstance(data.get('data'), dict):
                         video_url = data['data'].get('url', '') or data['data'].get('video_url', '')
                     if not video_url and data.get('video_id'):
-                        # 用 agnesapi 端点获取视频
                         return data.get('video_id')
                     return video_url
                 elif status == 'failed':
@@ -670,7 +971,7 @@ def _poll_video(task_api_id, base_url, headers, task_id, seg_idx):
 
 # ==================== Step 4: 逐段合成 ====================
 
-def _compose_segment_video(ffmpeg, visual_path, audio_path, subtitle_text, duration, output_path, mode):
+def _compose_segment_video(ffmpeg, visual_path, audio_path, subtitle_text, duration, output_path, mode, video_width=1152, video_height=768):
     """将画面+音频+字幕合成为一段完整视频"""
     if not ffmpeg:
         print("[数字人] ffmpeg 不可用")
@@ -699,7 +1000,7 @@ def _compose_segment_video(ffmpeg, visual_path, audio_path, subtitle_text, durat
                 f":x=(w-text_w)/2:y=h-th-40"
             )
 
-        vf = f'scale=1152:768:force_original_aspect_ratio=decrease,pad=1152:768:(ow-iw)/2:(oh-ih)/2:black{subtitle_filter}'
+        vf = f'scale={video_width}:{video_height}:force_original_aspect_ratio=decrease,pad={video_width}:{video_height}:(ow-iw)/2:(oh-ih)/2:black{subtitle_filter}'
 
         cmd = [
             ffmpeg, '-y',

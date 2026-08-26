@@ -152,14 +152,33 @@ CHARACTER_STYLES = {
 DEFAULT_CHARACTER_STYLE = 'anime'
 
 
-def get_style_base(category, character_style=None):
-    """根据分类和风格获取基础样式提示词"""
+def get_style_base(category, character_style=None, custom_style_text=None):
+    """根据分类和风格获取基础样式提示词
+    
+    Args:
+        category: 'character', 'scene', 'prop'
+        character_style: 风格名称
+        custom_style_text: 自定义风格描述文本（当 character_style='custom' 时使用）
+    """
+    # 如果是自定义风格，使用用户提供的风格描述
+    if character_style == 'custom' and custom_style_text:
+        return (
+            f"{custom_style_text} style, "
+            "high quality, detailed illustration, professional concept art. "
+            "9:16 vertical composition, pure white minimalist background, premium design board layout. "
+        )
     style = CHARACTER_STYLES.get(character_style, CHARACTER_STYLES['anime'])
     return style.get(category, style['character'])
 
 
-def build_character_image_prompt(desc, character_style=None):
-    """根据角色描述自动识别角色类型，生成合适的图片 prompt"""
+def build_character_image_prompt(desc, character_style=None, custom_style_text=None):
+    """根据角色描述自动识别角色类型，生成合适的图片 prompt
+    
+    Args:
+        desc: 角色描述
+        character_style: 风格名称
+        custom_style_text: 自定义风格描述文本
+    """
     desc_lower = desc.lower()
     
     # 检测角色类型
@@ -180,7 +199,7 @@ def build_character_image_prompt(desc, character_style=None):
     is_plant = any(kw in desc_lower for kw in plant_keywords)
     is_animal = any(kw in desc_lower for kw in animal_keywords)
     
-    base_style = get_style_base('character', character_style)
+    base_style = get_style_base('character', character_style, custom_style_text)
     
     if is_plant and not is_animal:
         # 植物角色
@@ -378,6 +397,7 @@ def drama_pipeline(drama_id, api_key, text_api_key=None):
 
         drama_base = ensure_drama_dirs(drama_id)
         character_style = drama_tasks[drama_id].get('character_style', DEFAULT_CHARACTER_STYLE)
+        custom_character_style = drama_tasks[drama_id].get('custom_character_style', '')
         img_success = 0
         img_fail = 0
         for idx, asset in enumerate(all_assets):
@@ -397,9 +417,9 @@ def drama_pipeline(drama_id, api_key, text_api_key=None):
                 else:
                     img_size = '768x1344'
             elif category == 'characters':
-                img_prompt, img_size = build_character_image_prompt(desc, character_style)
+                img_prompt, img_size = build_character_image_prompt(desc, character_style, custom_character_style)
             elif category == 'scenes':
-                style_base = get_style_base('scene', character_style)
+                style_base = get_style_base('scene', character_style, custom_character_style)
                 img_prompt = (
                     f"{style_base}"
                     f"16:9 horizontal composition, pure white background border. "
@@ -409,7 +429,7 @@ def drama_pipeline(drama_id, api_key, text_api_key=None):
                 )
                 img_size = '1344x768'
             else:
-                style_base = get_style_base('prop', character_style)
+                style_base = get_style_base('prop', character_style, custom_character_style)
                 img_prompt = (
                     f"{style_base}"
                     f"9:16 vertical composition, pure white minimalist background, premium prop design board layout. "
@@ -672,6 +692,7 @@ def drama_start():
     image_model = data.get('image_model', DEFAULT_IMAGE_MODEL)
     video_model = data.get('video_model', DEFAULT_VIDEO_MODEL)
     character_style = data.get('character_style', DEFAULT_CHARACTER_STYLE)
+    custom_character_style = data.get('custom_character_style', '').strip()
     drama_id = uuid.uuid4().hex[:12]
 
     text_api_key = get_vendor_api_key(text_model, fallback_key=api_key)
@@ -682,6 +703,7 @@ def drama_start():
             'prompt': prompt, 'shot_duration': shot_duration,
             'text_model': text_model, 'image_model': image_model, 'video_model': video_model,
             'character_style': character_style,
+            'custom_character_style': custom_character_style,
             'text_api_key': text_api_key,
             'script': None, 'story': None, 'storyboard': None, 'shots': [],
             'assets': [], 'video_results': [], 'shot_details': {},
@@ -1042,6 +1064,7 @@ def drama_asset_regenerate():
         name = asset.get('name', '')
         original_prompt_en = asset.get('prompt_en', '')
         character_style = drama.get('character_style', DEFAULT_CHARACTER_STYLE)
+        custom_character_style = drama.get('custom_character_style', '')
 
         # 如果用户提供了自定义中文描述，替换原始 desc 并重建 prompt
         if custom_desc and custom_desc.strip():
@@ -1051,9 +1074,9 @@ def drama_asset_regenerate():
                 assets[asset_index]['desc'] = desc
             # 用新 desc 通过模板重建英文 prompt
             if category == 'characters':
-                img_prompt, img_size = build_character_image_prompt(desc, character_style)
+                img_prompt, img_size = build_character_image_prompt(desc, character_style, custom_character_style)
             elif category == 'scenes':
-                style_base = get_style_base('scene', character_style)
+                style_base = get_style_base('scene', character_style, custom_character_style)
                 img_prompt = (
                     f"{style_base}"
                     f"16:9 horizontal composition, pure white background border. "
@@ -1063,7 +1086,7 @@ def drama_asset_regenerate():
                 )
                 img_size = '1344x768'
             else:
-                style_base = get_style_base('prop', character_style)
+                style_base = get_style_base('prop', character_style, custom_character_style)
                 img_prompt = (
                     f"{style_base}"
                     f"9:16 vertical composition, pure white minimalist background, premium prop design board layout. "
@@ -1079,9 +1102,9 @@ def drama_asset_regenerate():
                 img_prompt = original_prompt_en
                 img_size = '1344x768' if category == 'scenes' else '768x1344'
             elif category == 'characters':
-                img_prompt, img_size = build_character_image_prompt(desc, character_style)
+                img_prompt, img_size = build_character_image_prompt(desc, character_style, custom_character_style)
             elif category == 'scenes':
-                style_base = get_style_base('scene', character_style)
+                style_base = get_style_base('scene', character_style, custom_character_style)
                 img_prompt = (
                     f"{style_base}"
                     f"16:9 horizontal composition, pure white background border. "
@@ -1091,7 +1114,7 @@ def drama_asset_regenerate():
                 )
                 img_size = '1344x768'
             else:
-                style_base = get_style_base('prop', character_style)
+                style_base = get_style_base('prop', character_style, custom_character_style)
                 img_prompt = (
                     f"{style_base}"
                     f"9:16 vertical composition, pure white minimalist background, premium prop design board layout. "
@@ -1388,14 +1411,30 @@ def _regenerate_shot_video(drama_id, shot_index, shot, api_key, result_idx, cust
         vid_base_url = get_vendor_base_url(video_model)
         vid_api_key = get_vendor_api_key(video_model, fallback_key=api_key)
         headers = {'Authorization': f'Bearer {vid_api_key}', 'Content-Type': 'application/json'}
-        payload = {
-            'model': video_model, 'prompt': video_prompt,
-            'width': 1152, 'height': 768,
-            'num_frames': num_frames, 'frame_rate': 24,
-            'negative_prompt': 'text, subtitles, captions, labels, letters, words, writing, watermark, signs, typography, English text, Chinese text, any text overlay'
-        }
-        if primary_image:
-            payload['image'] = primary_image
+        if video_model.startswith('agnes-video-2.5'):
+            # Agnes Video 2.5 新参数格式：禁止 width/height/num_frames/negative_prompt 等字段
+            seconds = max(4, min(12, num_frames // 24))
+            if primary_image:
+                payload = {
+                    'model': video_model, 'prompt': video_prompt,
+                    'mode': 'keyframe', 'first_frame': primary_image,
+                    'seconds': str(seconds), 'size': '720P',
+                }
+            else:
+                payload = {
+                    'model': video_model, 'prompt': video_prompt,
+                    'mode': 'text', 'seconds': str(seconds), 'size': '720P',
+                    'aspect_ratio': '16:9',
+                }
+        else:
+            payload = {
+                'model': video_model, 'prompt': video_prompt,
+                'width': 1152, 'height': 768,
+                'num_frames': num_frames, 'frame_rate': 24,
+                'negative_prompt': 'text, subtitles, captions, labels, letters, words, writing, watermark, signs, typography, English text, Chinese text, any text overlay'
+            }
+            if primary_image:
+                payload['image'] = primary_image
 
         # 提交视频任务
         vtask_id = None
@@ -1405,7 +1444,8 @@ def _regenerate_shot_video(drama_id, shot_index, shot, api_key, result_idx, cust
             resp = requests.post(f'{vid_base_url}/videos', headers=headers, json=payload, timeout=60)
             if resp.status_code == 200:
                 vdata = resp.json()
-                vtask_id = vdata.get('task_id') or vdata.get('video_id')
+                vtask_id = vdata.get('task_id') or vdata.get('id') or vdata.get('video_id')
+                v_video_id_resp = vdata.get('video_id') or vdata.get('id', '')
                 break
             elif resp.status_code == 400 and use_negative_prompt and 'negative_prompt' in resp.text.lower():
                 print(f"[镜头重生成] 视频模型不支持 negative_prompt 参数，已移除")
@@ -1435,15 +1475,32 @@ def _regenerate_shot_video(drama_id, shot_index, shot, api_key, result_idx, cust
 
         print(f"[镜头重生成] 镜头 {shot_index} 已提交，task_id={vtask_id}")
 
+        # 判断是否使用 /agnesapi 查询端点
+        use_agnesapi_poll = video_model.startswith('agnes-video-2.5') and v_video_id_resp
+
         # 轮询等待完成
         v_url = ''
         v_video_id = ''
         for poll_i in range(120):
             time.sleep(10)
             try:
-                poll_resp = requests.get(f'{vid_base_url}/videos/{vtask_id}', headers=headers, timeout=30)
+                if use_agnesapi_poll:
+                    poll_resp = requests.get(
+                        f'{vid_base_url}/agnesapi',
+                        headers=headers,
+                        params={'video_id': v_video_id_resp, 'model_name': video_model},
+                        timeout=30
+                    )
+                else:
+                    poll_resp = requests.get(f'{vid_base_url}/videos/{vtask_id}', headers=headers, timeout=30)
                 if poll_resp.status_code != 200:
                     continue
+                # 检查是否是直接的视频流
+                content_type = poll_resp.headers.get('Content-Type', '')
+                if 'video' in content_type or 'octet-stream' in content_type:
+                    print(f"[镜头重生成] 镜头 {shot_index} /agnesapi 返回视频流")
+                    v_video_id = v_video_id_resp
+                    break
                 pr_data = poll_resp.json()
                 v_status = pr_data.get('status', '')
                 if v_status == 'completed':
@@ -1455,7 +1512,7 @@ def _regenerate_shot_video(drama_id, shot_index, shot, api_key, result_idx, cust
                     if not v_url and isinstance(pr_data.get('remixed_from_video_id'), str) and pr_data['remixed_from_video_id'].startswith('http'):
                         v_url = pr_data['remixed_from_video_id']
                     # 提取 video_id（新 API 格式）
-                    v_video_id = pr_data.get('video_id', '')
+                    v_video_id = pr_data.get('video_id', '') or v_video_id_resp
                     break
                 elif v_status == 'failed':
                     with drama_lock:
@@ -1499,9 +1556,11 @@ def _regenerate_shot_video(drama_id, shot_index, shot, api_key, result_idx, cust
                 print(f"[镜头重生成] 镜头 {shot_index} content 端点请求失败: {ce}")
         if not local_fn and v_video_id:
             print(f"[镜头重生成] 镜头 {shot_index} 使用 video_id 下载: {v_video_id[:50]}...")
+            model_name_param = video_model if video_model.startswith('agnes-video-2.5') else None
             local_fn = download_video_by_video_id(
                 v_video_id, vid_base_url, headers,
-                f'dramas/{drama_id}/videos', f'shot_{shot_index}'
+                f'dramas/{drama_id}/videos', f'shot_{shot_index}',
+                model_name=model_name_param
             )
 
         if local_fn:

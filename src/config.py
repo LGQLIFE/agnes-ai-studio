@@ -108,7 +108,7 @@ VENDOR_BASE_URLS = {
     'gpt': 'https://api.openai.com/v1',
     'qwen': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     'doubao': 'https://ark.cn-beijing.volces.com/api/v3',
-    'minimax': 'https://api.minimaxi.chat/v1',
+    'minimax': 'https://api.minimaxi.com/v1',
     'ollama': 'http://localhost:11434/v1',  # Ollama 本地部署
 }
 
