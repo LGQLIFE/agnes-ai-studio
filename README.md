@@ -2,6 +2,27 @@
 
 一个基于 Agnes AI API 的图片和视频生成可视化工具，提供美观的 Web 操作界面。
 
+## 💬 交流与反馈
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/wechat-official-account.jpg" width="240" alt="公众号：走近程序员"><br>
+      <strong>公众号：走近程序员</strong>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/wechat-group.png" width="240" alt="Agnes 交流群"><br>
+      <strong>微信群：Agnes 交流群</strong>
+    </td>
+  </tr>
+</table>
+
+> 📢 关注公众号「走近程序员」获取项目更新与使用教程，也可扫码加入 **Agnes 交流群** 一起交流讨论。
+>
+> 💡 群二维码 7 天内有效，如已过期，可通过公众号获取最新入群方式。
+
+---
+
 ## 功能
 
 - **🖼 文生图** - 通过文本描述生成高质量图片
